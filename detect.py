@@ -7,6 +7,13 @@ from nanodet.util import cfg, load_config, Logger
 from nanodet.model.arch import build_model
 from nanodet.util import load_model_weight
 from nanodet.data.transform import Pipeline
+import numpy as np
+import cv2
+import copy
+import pycocotools.mask as mask_util
+import matplotlib as mpl
+import matplotlib.figure as mplfigure
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 
 class Predictor(object):
     def __init__(self, cfg, model_path, logger, device='cuda:0'):
@@ -54,12 +61,28 @@ def get_image_list(path):
                 image_names.append(apath)
     return image_names
 
-def detect():
-    load_config(cfg, "./config/nanodet-m.yml")
+def detect(cfgFile="./config/nanodet-m.yml", modelFile="model/nanodet_m.pth", device='cpu'):
+    load_config(cfg, cfgFile)
     logger = Logger(-1, use_tensorboard=False)
-    predictor = Predictor(cfg, "model/nanodet_m.pth", logger, device='cpu')
+    predictor = Predictor(cfg, modelFile, logger, device)
     return predictor
 
-def predict(predictor, img):
+def predict(predictor, img, score_thresh=0.35):
     meta, res = predictor.inference(img)
-    return meta, res
+    all_box = []
+    dets = res
+    class_names = cfg.class_names
+    for label in dets:
+        for bbox in dets[label]:
+            score = bbox[-1]
+            if score>score_thresh:
+                x0, y0, x1, y1 = [int(i) for i in bbox[:4]]
+                all_box.append([label, x0, y0, x1, y1, score])
+    all_box.sort(key=lambda v: v[5])
+    resBox = []
+    for box in all_box:
+        label, x0, y0, x1, y1, score = box
+        # color = self.cmap(i)[:3]
+        text = '{}%'.format(class_names[label])
+        resBox.append((text,x0, y0, x1, y1, score))
+    return resBox
