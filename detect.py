@@ -15,8 +15,9 @@ import matplotlib as mpl
 import matplotlib.figure as mplfigure
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 
+
 class Predictor(object):
-    def __init__(self, cfg, model_path, logger, device='cuda:0'):
+    def __init__(self, cfg, model_path, logger, device):
         self.cfg = cfg
         self.device = device
         model = build_model(cfg.model)
@@ -45,11 +46,6 @@ class Predictor(object):
             results = self.model.inference(meta)
         return meta, results
 
-    def visualize(self, dets, meta, class_names, score_thres, wait=0):
-        time1 = time.time()
-        self.model.head.show_result(meta['raw_img'], dets, class_names, score_thres=score_thres, show=True)
-        print('viz time: {:.3f}s'.format(time.time()-time1))
-
 
 def get_image_list(path):
     image_names = []
@@ -61,11 +57,17 @@ def get_image_list(path):
                 image_names.append(apath)
     return image_names
 
-def detect(cfgFile="./config/nanodet-m.yml", modelFile="model/nanodet_m.pth", device='cpu'):
+
+def detect(cfgFile="./config/nanodet-m.yml", modelFile="model/nanodet_m.pth", forceUseCPU=False):
     load_config(cfg, cfgFile)
     logger = Logger(-1, use_tensorboard=False)
+    if torch.cuda.is_available() and not forceUseCPU:
+        device = 'cuda:0'
+    else:
+        device = 'cpu'
     predictor = Predictor(cfg, modelFile, logger, device)
     return predictor
+
 
 def predict(predictor, img, score_thresh=0.35):
     meta, res = predictor.inference(img)
@@ -75,7 +77,7 @@ def predict(predictor, img, score_thresh=0.35):
     for label in dets:
         for bbox in dets[label]:
             score = bbox[-1]
-            if score>score_thresh:
+            if score > score_thresh:
                 x0, y0, x1, y1 = [int(i) for i in bbox[:4]]
                 all_box.append([label, x0, y0, x1, y1, score])
     all_box.sort(key=lambda v: v[5])
@@ -83,6 +85,28 @@ def predict(predictor, img, score_thresh=0.35):
     for box in all_box:
         label, x0, y0, x1, y1, score = box
         # color = self.cmap(i)[:3]
-        text = '{}%'.format(class_names[label])
-        resBox.append((text,x0, y0, x1, y1, score))
+        text = '{}'.format(class_names[label])
+        resBox.append((text, x0, y0, x1, y1, score))
     return resBox
+
+
+if __name__ == '__main__':
+    torch.backends.cudnn.enabled = True
+    torch.backends.cudnn.benchmark = True
+    predictor = detect(forceUseCPU=True)
+    cap = cv2.VideoCapture("1.mp4")
+    while True:
+        start = time.time()
+        ret_val, frame = cap.read()
+        if not ret_val:
+            break
+        resBox = predict(predictor, frame, score_thresh=0.35)
+        for box in resBox:
+            text, x0, y0, x1, y1, score = box
+            cv2.rectangle(frame, (x0, y0), (x1, y1), (0, 255, 0), 2)
+            cv2.putText(frame, text, (x0, y0), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        cv2.imshow("frame", frame)
+        print("time:", time.time() - start)
+        print('FPS:', 1 / (time.time() - start))
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
